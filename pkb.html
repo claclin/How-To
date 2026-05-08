@@ -82,6 +82,25 @@
             display: flex; flex-direction: column;
             z-index: 20; box-shadow: 10px 0 30px rgba(0,0,0,0.02);
             transition: background 0.3s ease;
+            position: relative;
+            flex-shrink: 0;
+        }
+        
+        /* Resizer handle */
+        .resizer {
+            width: 4px;
+            cursor: col-resize;
+            background: transparent;
+            height: 100%;
+            position: absolute;
+            right: 0;
+            top: 0;
+            z-index: 30;
+            transition: background 0.2s;
+        }
+        .resizer:hover, .resizer.resizing {
+            background: var(--category-color);
+            opacity: 0.5;
         }
         .sidebar-header { padding: 2.5rem 2rem 1rem; }
         .sidebar-content { flex: 1; overflow-y: auto; padding: 0 1.5rem 2.5rem; }
@@ -103,7 +122,7 @@
             padding: 0 3rem; position: sticky; top: 0; z-index: 10;
             transition: background 0.4s ease;
         }
-        .viewer { flex: 1; overflow-y: auto; padding: 5rem 6rem; scroll-padding-top: 6rem; }
+        .viewer { flex: 1; overflow-y: auto; padding: 5rem 4vw; scroll-padding-top: 6rem; }
 
         h1, h2, h3, .font-display { font-family: var(--font-display); }
         .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -149,13 +168,27 @@
 
         /* Typography / Prose - HIGH FIDELITY */
         .prose { 
-            line-height: 1.8; font-size: 1.05rem; max-width: 1000px; margin: 0 auto; 
+            line-height: 1.8; font-size: 1.05rem; max-width: 1400px; margin: 0 auto; 
             color: var(--text-primary);
         }
         .prose h1 { font-size: 3.5rem; margin-bottom: 2.5rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
         .prose h2 { font-size: 2.2rem; margin-top: 4rem; margin-bottom: 1.5rem; font-weight: 700; border-bottom: 2px solid var(--border-primary); padding-bottom: 0.5rem; }
         .prose h3 { font-size: 1.5rem; margin-top: 2.5rem; margin-bottom: 1rem; font-weight: 700; }
         .prose p { margin-bottom: 1.5rem; opacity: 0.9; }
+        
+        /* List Styling - Fix for missing numbers/bullets */
+        .prose ul { list-style-type: disc; margin-bottom: 1.5rem; padding-left: 1.5rem; }
+        .prose ol { list-style-type: decimal; margin-bottom: 1.5rem; padding-left: 1.5rem; }
+        .prose li { margin-bottom: 0.5rem; }
+        .prose li > ul, .prose li > ol { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+        .prose li::marker { color: var(--category-color); font-weight: 700; }
+        
+        /* Support for manual technical numbering like 1.1, 1.1.1 */
+        .technical-marker {
+            color: var(--category-color);
+            font-weight: 800;
+            margin-right: 0.25rem;
+        }
         
         /* Code Blocks & Pre */
         .prose pre {
@@ -304,6 +337,7 @@
                 </div>
                 <button id="clearAll" style="background: transparent; border: none; cursor: pointer; color: var(--text-secondary); opacity: 0.4; transition: opacity 0.2s;"><i data-lucide="trash-2"></i></button>
             </div>
+            <div id="resizer" class="resizer"></div>
         </aside>
 
         <!-- Main -->
@@ -497,8 +531,49 @@
                 await saveManual(window.EMBEDDED_DATA.content, window.EMBEDDED_DATA.filename, window.EMBEDDED_DATA.category || 'GENERAL');
                 loadManual(window.EMBEDDED_DATA.filename);
             }
+            initResizer();
             refreshLibrary();
         });
+
+        function initResizer() {
+            const resizer = document.getElementById('resizer');
+            const sidebar = resizer.parentElement;
+            let isResizing = false;
+
+            // Load saved width
+            const savedWidth = localStorage.getItem('ckb_sidebar_width');
+            if (savedWidth) {
+                sidebar.style.width = savedWidth + 'px';
+            }
+
+            resizer.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                resizer.classList.add('resizing');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                
+                let newWidth = e.clientX;
+                // Constraints
+                if (newWidth < 280) newWidth = 280;
+                if (newWidth > window.innerWidth * 0.6) newWidth = window.innerWidth * 0.6;
+                
+                sidebar.style.width = newWidth + 'px';
+                localStorage.setItem('ckb_sidebar_width', newWidth);
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    resizer.classList.remove('resizing');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        }
 
         async function refreshLibrary() {
             const manuals = await getAllManuals();
@@ -653,14 +728,14 @@
             const s = activeSections.find(x => x.id === id);
             if (!s) return;
             document.getElementById('focus-parent-manual').textContent = activeManual.category;
-            // Hide the focus-title since the H1 heading is now part of the rendered content
             document.getElementById('focus-title').textContent = '';
             
-            // The section content includes H1 and all its H2/H3 sub-headings.
-            // marked will render them as proper heading hierarchy inside the article.
+            // Pre-process content to highlight technical numbering (e.g., 1.1, 1.2.1)
+            const processedContent = s.content.replace(/^(\s*)(\d+(\.\d+)+)\s/gm, '$1<span class="technical-marker">$2</span> ');
+
             const html = (window.DOMPurify && window.marked)
-                ? DOMPurify.sanitize(marked.parse(s.content))
-                : '<pre>' + s.content + '</pre>';
+                ? DOMPurify.sanitize(marked.parse(processedContent))
+                : '<pre>' + processedContent + '</pre>';
             document.getElementById('content').innerHTML = html;
             postProcessContent();
             document.getElementById('viewer-container').scrollTo({ top: 0, behavior: 'smooth' });
@@ -669,7 +744,13 @@
         function renderFullDocument() {
             document.getElementById('focus-parent-manual').textContent = activeManual.category;
             document.getElementById('focus-title').textContent = activeManual.filename;
-            const html = (window.DOMPurify && window.marked) ? DOMPurify.sanitize(marked.parse(activeManual.content)) : '<pre>' + activeManual.content + '</pre>';
+            
+            // Pre-process content to highlight technical numbering (e.g., 1.1, 1.2.1)
+            const processedContent = activeManual.content.replace(/^(\s*)(\d+(\.\d+)+)\s/gm, '$1<span class="technical-marker">$2</span> ');
+
+            const html = (window.DOMPurify && window.marked) 
+                ? DOMPurify.sanitize(marked.parse(processedContent)) 
+                : '<pre>' + processedContent + '</pre>';
             document.getElementById('content').innerHTML = html;
             postProcessContent();
         }
